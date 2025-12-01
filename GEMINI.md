@@ -61,7 +61,7 @@ This allows the database to be built organically from the ingested fiscal notes.
 
 ## 6. Next Steps
 
--   **Test Ingestion:** User to confirm the data ingestion workflow is functioning as expected.
+-   **Aguardando Dados para Teste de Ingestão:** Estamos aguardando os dados de uma nota fiscal (chave NFC-e) do usuário para testar o endpoint de ingestão (`POST /api/ingest/nfce`) e o cadastro de produtos. O trabalho está pausado neste ponto, aguardando essa entrada.
 -   **Develop Price Suggestion Feature:** The next major feature to implement is the logic for suggesting a selling price. This will likely involve creating a new endpoint or enhancing an existing one (`/api/price/nearby`) to:
     1.  Query the database for purchase prices of a given EAN.
     2.  Apply a business rule (e.g., add a markup percentage) to calculate a suggested selling price.
