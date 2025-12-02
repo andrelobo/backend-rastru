@@ -57,6 +57,11 @@ This allows the database to be built organically from the ingested fiscal notes.
     3.  **Schema Errors:** Fixed `Cannot determine a type` errors in `product.schema.ts` and `price.schema.ts` by explicitly defining the type for fields using `Record<string, any>`. The fix was to change `@Prop()` to `@Prop({ type: Object })`.
     4.  **Dependency Injection:** Resolved a `Nest can't resolve dependencies` error in `ProductsService`. The `PriceModel` was made available to `ProductsModule` by importing it via `MongooseModule.forFeature()`.
     5.  **Logging:** Added connection logging for MongoDB in `app.module.ts` to provide feedback on the database connection status.
+-   **Recent Actions & Discussions:**
+    -   **`.gitignore` Creation:** Created a `.gitignore` file with standard entries for Node.js/NestJS projects.
+    -   **`README.md` Improvement:** Improved and translated the `README.md` to Portuguese, providing a more comprehensive project overview and setup instructions.
+    -   **Authentication Status:** Confirmed that no authentication mechanism is currently implemented.
+    -   **Git Status:** The user has performed a `git push`.
 -   **Current Status:** The application is successfully running in development mode (`yarn start:dev`). The user is proceeding to test the `POST /api/ingest/nfce` endpoint using an API client (Insomnia) and a real NFC-e key.
 
 ## 6. Next Steps
