@@ -1,0 +1,146 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import * as fs from 'fs';
+import * as path from 'path';
+import { NFCe } from '../fiscal-document/schemas/nfce.schema';
+import { NFe } from '../fiscal-document/schemas/nfe.schema';
+
+@Injectable()
+export class DanfeService {
+  private storagePath: string;
+
+  constructor(
+    @InjectModel(NFCe.name) private nfceModel: Model<NFCe>,
+    @InjectModel(NFe.name) private nfeModel: Model<NFe>,
+  ) {
+    this.storagePath = process.env.STORAGE_PATH || './storage/danfe';
+    this.criarDiretorioStorage();
+  }
+
+  private criarDiretorioStorage() {
+    if (!fs.existsSync(this.storagePath)) {
+      fs.mkdirSync(this.storagePath, { recursive: true });
+    }
+  }
+
+  async gerarDanfe(documento: NFCe | NFe): Promise<string> {
+    const html = this.gerarHtml(documento);
+    const htmlPath = this.getHtmlPath(documento.chaveAcesso);
+    const pdfPath = this.getPdfPath(documento.chaveAcesso);
+
+    // Salvar HTML
+    fs.writeFileSync(htmlPath, html);
+
+    // TODO: Implementar conversão para PDF
+    // await this.convertHTMLtoPDF(htmlPath, pdfPath);
+
+    return htmlPath;
+  }
+
+  async gerarHtml(chaveAcesso: string): Promise<string> {
+    const documento = await this.buscarDocumento(chaveAcesso);
+    return this.gerarHtml(documento);
+  }
+
+  async gerarPdf(chaveAcesso: string): Promise<Buffer> {
+    const pdfPath = this.getPdfPath(chaveAcesso);
+    
+    if (!fs.existsSync(pdfPath)) {
+      await this.gerarDanfeCompleto(chaveAcesso);
+    }
+
+    return fs.readFileSync(pdfPath);
+  }
+
+  async gerarHtmlComTemplate(chaveAcesso: string): Promise<string> {
+    const documento = await this.buscarDocumento(chaveAcesso);
+    return this.gerarTemplateHtmlCompleto(documento);
+  }
+
+  private async buscarDocumento(chaveAcesso: string): Promise<NFCe | NFe> {
+    let documento = await this.nfceModel.findOne({ chaveAcesso });
+    if (documento) return documento;
+
+    documento = await this.nfeModel.findOne({ chaveAcesso });
+    if (documento) return documento;
+
+    throw new NotFoundException(`Documento com chave ${chaveAcesso} não encontrado`);
+  }
+
+ // Substitua TODO o método gerarHtmlNFCe no danfe.service.ts
+private gerarHtmlNFCe(nfce: NFCe): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>DANFE NFC-e - ${nfce.chaveAcesso}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .section { margin-bottom: 20px; border: 1px solid #ccc; padding: 15px; }
+        .section-title { background: #f0f0f0; padding: 5px; font-weight: bold; }
+        .table { width: 100%; border-collapse: collapse; }
+        .table th, .table td { border: 1px solid #ccc; padding: 8px; }
+        .table th { background: #f0f0f0; }
+        .total { font-weight: bold; font-size: 1.2em; }
+        .qrcode { text-align: center; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>DANFE NFC-e</h1>
+        <p>Chave de Acesso: ${nfce.chaveAcesso}</p>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Dados da Nota</div>
+        <p><strong>Número:</strong> ${nfce.numero}</p>
+        <p><strong>Série:</strong> ${nfce.serie}</p>
+        <p><strong>Data de Emissão:</strong> ${nfce.dataEmissao.toLocaleString()}</p>
+        <p><strong>Valor Total:</strong> R$ ${nfce.valorTotal.toFixed(2)}</p>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Emitente</div>
+        <p><strong>CNPJ:</strong> ${(nfce.emitente as any)?.cnpj || 'N/A'}</p>
+        <!-- Mais dados do emitente -->
+    </div>
+
+    <div class="section">
+        <div class="section-title">Produtos</div>
+        <table class="table">
+            <tr>
+                <th>Código</th>
+                <th>Descrição</th>
+                <th>Qtd</th>
+                <th>Un</th>
+                <th>Valor Unit.</th>
+                <th>Valor Total</th>
+            </tr>
+            ${(nfce.produtos || []).map(prod => `
+            <tr>
+                <td>${prod.codigo || ''}</td>
+                <td>${prod.descricao || ''}</td>
+                <td>${prod.quantidade || 0}</td>
+                <td>${prod.unidade || ''}</td>
+                <td>R$ ${(prod.valorUnitario || 0).toFixed(2)}</td>
+                <td>R$ ${(prod.valorTotal || 0).toFixed(2)}</td>
+            </tr>
+            `).join('')}
+        </table>
+    </div>
+
+    ${nfce.qrCode ? `
+    <div class="qrcode">
+        <div class="section-title">QR Code</div>
+        <p>${nfce.qrCode}</p>
+        <p><small>Use este código para verificar a autenticidade da nota fiscal</small></p>
+    </div>
+    ` : ''}
+</body>
+</html>
+`;
+    }
+    

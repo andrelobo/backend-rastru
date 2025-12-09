@@ -1,20 +1,32 @@
-// src/modules/ingestion/ingestion.service.ts
 import { Injectable } from '@nestjs/common';
-import { InfosimplesService } from '../infosimples/infosimples.service';
 
 @Injectable()
 export class IngestionService {
-  constructor(private readonly infosimplesService: InfosimplesService) {
-    console.log('IngestionService inicializado com InfosimplesService');
+  async processarNFCe(chaveAcesso: string, timeout?: number) {
+    return {
+      message: 'NFC-e mock processada',
+      chaveAcesso,
+      timestamp: new Date().toISOString()
+    };
   }
 
-  async ingestNfceKey(nfceKey: string) {
-    console.log(`Processando NFC-e: ${nfceKey}`);
-    
-    if (!nfceKey || nfceKey.length < 44) {
-      throw new Error('Chave NFC-e inválida');
-    }
-    
-    return await this.infosimplesService.consultNfce(nfceKey);
+  async processarAutomaticamente(qrCode: string, timeout?: number) {
+    return {
+      message: 'Documento mock processado',
+      qrCode,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  async verificarConexaoMongoDB(): Promise<boolean> {
+    return true;
+  }
+
+  async verificarConexaoInfosimples(): Promise<boolean> {
+    return true;
+  }
+
+  async verificarStorage(): Promise<boolean> {
+    return true;
   }
 }

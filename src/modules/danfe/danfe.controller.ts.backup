@@ -1,0 +1,81 @@
+import { Controller, Get, Param, Res, HttpStatus, NotFoundException } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
+import { Response } from 'express';
+import { DanfeService } from './danfe.service';
+
+@ApiTags('danfe')
+@Controller('api/v1/danfe')
+export class DanfeController {
+  constructor(private readonly danfeService: DanfeService) {}
+
+  @Get('html/:chave')
+  @ApiOperation({ summary: 'Gerar DANFE em HTML' })
+  @ApiParam({ name: 'chave', description: 'Chave de acesso da NFC-e/NFe' })
+  @ApiResponse({ status: 200, description: 'HTML gerado com sucesso' })
+  @ApiResponse({ status: 404, description: 'Documento não encontrado' })
+  async gerarHtml(@Param('chave') chave: string, @Res() res: Response) {
+    try {
+      const html = await this.danfeService.gerarHtml(chave);
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        res.status(HttpStatus.NOT_FOUND).json({
+          message: error.message,
+        });
+      } else {
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+          message: 'Erro ao gerar DANFE',
+          error: error.message,
+        });
+      }
+    }
+  }
+
+  @Get('pdf/:chave')
+  @ApiOperation({ summary: 'Gerar DANFE em PDF' })
+  @ApiParam({ name: 'chave', description: 'Chave de acesso da NFC-e/NFe' })
+  @ApiResponse({ status: 200, description: 'PDF gerado com sucesso', content: { 'application/pdf': {} } })
+  @ApiResponse({ status: 404, description: 'Documento não encontrado' })
+  async gerarPdf(@Param('chave') chave: string, @Res() res: Response) {
+    try {
+      const pdfBuffer = await this.danfeService.gerarPdf(chave);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="DANFE-${chave}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        res.status(HttpStatus.NOT_FOUND).json({
+          message: error.message,
+        });
+      } else {
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+          message: 'Erro ao gerar PDF',
+          error: error.message,
+        });
+      }
+    }
+  }
+
+  @Get('view/:chave')
+  @ApiOperation({ summary: 'Visualizar DANFE em navegador' })
+  @ApiParam({ name: 'chave', description: 'Chave de acesso da NFC-e/NFe' })
+  async viewDanfe(@Param('chave') chave: string, @Res() res: Response) {
+    try {
+      const html = await this.danfeService.gerarHtmlComTemplate(chave);
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        res.status(HttpStatus.NOT_FOUND).json({
+          message: error.message,
+        });
+      } else {
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+          message: 'Erro ao gerar visualização',
+          error: error.message,
+        });
+      }
+    }
+  }
+}

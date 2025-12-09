@@ -1,12 +1,18 @@
 import { Controller, Post, Body, Get, HttpStatus, HttpException } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { IngestionService } from './ingestion.service';
 import { IngestNfceDto, IngestAutoDto, HealthCheckDto } from './dto/ingest.dto';
 
+@ApiTags('ingestion')
 @Controller('api/v1/ingest')
 export class IngestionController {
   constructor(private readonly ingestionService: IngestionService) {}
 
   @Post('nfce')
+  @ApiOperation({ summary: 'Ingerir NFC-e por chave de acesso' })
+  @ApiBody({ type: IngestNfceDto })
+  @ApiResponse({ status: 201, description: 'NFC-e processada com sucesso' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
   async ingestNfce(@Body() body: IngestNfceDto) {
     try {
       return await this.ingestionService.processarNFCe(body.chaveAcesso, body.timeout);
@@ -19,6 +25,10 @@ export class IngestionController {
   }
 
   @Post('auto')
+  @ApiOperation({ summary: 'Ingestão automática por QR Code' })
+  @ApiBody({ type: IngestAutoDto })
+  @ApiResponse({ status: 201, description: 'Documento processado com sucesso' })
+  @ApiResponse({ status: 400, description: 'QR Code inválido' })
   async ingestAuto(@Body() body: IngestAutoDto) {
     try {
       return await this.ingestionService.processarAutomaticamente(body.qrCode, body.timeout);
@@ -31,7 +41,9 @@ export class IngestionController {
   }
 
   @Get('health')
-  async healthCheck(@Body() body: HealthCheckDto) {
+  @ApiOperation({ summary: 'Verificar saúde do sistema de ingestão' })
+  @ApiResponse({ status: 200, description: 'Sistema saudável' })
+  async healthCheck() {
     try {
       return {
         status: 'healthy',
