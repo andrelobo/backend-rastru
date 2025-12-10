@@ -1,39 +1,23 @@
-import { Module, OnModuleInit, Logger } from '@nestjs/common';
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ProductsModule } from './modules/products/products.module';
-import { StoresModule } from './modules/stores/stores.module';
-import { PricesModule } from './modules/prices/prices.module';
-import { InfosimplesModule } from './modules/infosimples/infosimples.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
-import * as dotenv from 'dotenv';
-import * as mongoose from 'mongoose'; // Import mongoose
-
-dotenv.config();
+import { ProductsModule } from './modules/products/products.module';
+import { PricesModule } from './modules/prices/prices.module';
+import { StoresModule } from './modules/stores/stores.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     MongooseModule.forRoot(process.env.MONGO_URI || 'mongodb://localhost:27017/rastru'),
-    ProductsModule,
-    StoresModule,
-    PricesModule,
-    InfosimplesModule,
-    IngestionModule
+    IngestionModule,
+    ProductsModule,    // ← ADICIONADO
+    PricesModule,      // ← ADICIONADO (se existir)
+    StoresModule,      // ← ADICIONADO (se existir)
   ],
   controllers: [],
-  providers: []
+  providers: [],
 })
-export class AppModule implements OnModuleInit {
-  private readonly logger = new Logger(AppModule.name);
-
-  onModuleInit() {
-    mongoose.connection.on('connected', () => {
-      this.logger.log('MongoDB connected successfully');
-    });
-    mongoose.connection.on('error', (err) => {
-      this.logger.error(`MongoDB connection error: ${err}`);
-    });
-    mongoose.connection.on('disconnected', () => {
-      this.logger.warn('MongoDB disconnected');
-    });
-  }
-}
+export class AppModule {}

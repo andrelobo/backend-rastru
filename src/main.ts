@@ -1,4 +1,3 @@
-// src/main.ts - VERSÃO CORRIGIDA
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
@@ -7,6 +6,9 @@ async function bootstrap() {
   
   // CORS
   app.enableCors();
+  
+  // ADICIONE ESTA LINHA ↓↓↓
+  app.setGlobalPrefix('api/v1');
   
   const port = process.env.PORT || 3000;
   await app.listen(port);

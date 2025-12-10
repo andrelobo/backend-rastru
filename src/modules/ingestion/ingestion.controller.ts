@@ -1,18 +1,41 @@
-import { Controller, Post, Body, Get, HttpStatus, HttpException } from '@nestjs/common';
+import { 
+  Controller, 
+  Post, 
+  Body, 
+  Get, 
+  HttpStatus, 
+  HttpException,
+  BadRequestException,
+  Inject,
+  Param  // ← IMPORTANTE!
+} from '@nestjs/common';
 import { IngestionService } from './ingestion.service';
-import { IngestNfceDto, IngestAutoDto, HealthCheckDto } from './dto/ingest.dto';
+import { InfosimplesService } from '../infosimples/infosimples.service';
+import { IngestNfceDto, IngestAutoDto } from './dto/ingest.dto';
 
-@Controller('api/v1/ingest')
+@Controller('ingest')
 export class IngestionController {
-  constructor(private readonly ingestionService: IngestionService) {}
+  constructor(
+    private readonly ingestionService: IngestionService,
+    @Inject(InfosimplesService)
+    private readonly infosimplesService: InfosimplesService,
+  ) {}
 
   @Post('nfce')
   async ingestNfce(@Body() body: IngestNfceDto) {
     try {
+      if (!body || !body.chaveAcesso) {
+        throw new BadRequestException('Chave de acesso é obrigatória');
+      }
+      
       return await this.ingestionService.processarNFCe(body.chaveAcesso, body.timeout);
-    } catch (error) {
+    } catch (error: any) {
       throw new HttpException(
-        error.message || 'Erro ao processar NFC-e',
+        {
+          message: error.message || 'Erro ao processar NFC-e',
+          error: error.response?.error || 'Internal Server Error',
+          statusCode: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        },
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -21,17 +44,59 @@ export class IngestionController {
   @Post('auto')
   async ingestAuto(@Body() body: IngestAutoDto) {
     try {
+      if (!body || !body.qrCode) {
+        throw new BadRequestException('QR Code é obrigatório');
+      }
+      
       return await this.ingestionService.processarAutomaticamente(body.qrCode, body.timeout);
-    } catch (error) {
+    } catch (error: any) {
       throw new HttpException(
-        error.message || 'Erro ao processar documento',
+        {
+          message: error.message || 'Erro ao processar documento',
+          error: error.response?.error || 'Internal Server Error',
+          statusCode: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        },
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
+  @Get('test-db')
+  async testDb() {
+    return this.ingestionService.testarBanco();
+  }
+
+  @Get('test-nfce-api')
+  async testNfceApi() {
+    return this.infosimplesService.testConnection();
+  }
+
+  @Get('debug-raw/:chave')
+  async debugRaw(@Param('chave') chave: string) {
+    try {
+      // Chama a API diretamente para ver resposta bruta
+      const rawData = await this.infosimplesService.consultNfe(chave, 30);
+      
+      return {
+        success: true,
+        chave,
+        rawResponse: rawData,
+        // Extrair estrutura da primeira nota
+        nota: rawData.data?.[0] || null,
+        produtos: rawData.data?.[0]?.produtos || [],
+        produtoCount: rawData.data?.[0]?.produtos?.length || 0,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+        response: error.response?.data,
+      };
+    }
+  }
+
   @Get('health')
-  async healthCheck(@Body() body: HealthCheckDto) {
+  async healthCheck() {
     try {
       return {
         status: 'healthy',
@@ -43,9 +108,13 @@ export class IngestionController {
         },
         version: process.env.npm_package_version || '1.0.0',
       };
-    } catch (error) {
+    } catch (error: any) {
       throw new HttpException(
-        { status: 'unhealthy', error: error.message },
+        { 
+          status: 'unhealthy', 
+          error: error.message,
+          timestamp: new Date().toISOString(),
+        },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
