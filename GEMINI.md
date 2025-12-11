@@ -1,16 +1,16 @@
 # Gemini Development Context for Project Rastru
 
-This document summarizes the development context, decisions made, and current status of the Rastru backend project as of 2025-12-01. It serves as a shared understanding for continuing development.
+This document summarizes the development context, decisions made, and current status of the Rastru backend project as of 2025-12-10. It serves as a shared understanding for continuing development.
 
 ## 1. Project Overview
 
-The primary goal is to create a backend system that tracks product prices sourced from Brazilian electronic fiscal notes (NFC-e). The core user workflow is:
+The primary goal is to create a backend system that tracks product prices sourced from Brazilian electronic fiscal notes (NFC-e and NF-e). The core user workflow is:
 
-1.  Read a QR Code from a receipt to get a 44-digit NFC-e key.
-2.  Ingest this key into the system.
-3.  The system uses an external service (Infosimples) to fetch details of the NFC-e, including products, EANs, and purchase prices.
-4.  This data is used to populate a local database.
-5.  Use the collected data to query product prices (e.g., by location) and calculate a suggested selling price for a client.
+1.  Read a QR Code or receive a 44-digit key for a fiscal note (NFC-e/NF-e).
+2.  Ingest this key into the system via a unified API endpoint.
+3.  The system uses an external service (Infosimples) to fetch the full details of the fiscal note.
+4.  This data is processed and stored using a normalized data model.
+5.  Use the collected data to query product prices and other fiscal data.
 
 ## 2. Architecture & Technologies
 
@@ -19,56 +19,65 @@ The primary goal is to create a backend system that tracks product prices source
 -   **Database:** MongoDB
 -   **Package Manager:** Yarn
 
-The application is structured into the following NestJS modules:
--   `ingestion`: Handles the ingestion of new NFC-e data.
--   `products`: Manages product information.
--   `prices`: Manages price information and history.
--   `stores`: Manages store information.
--   `infosimples`: A service to communicate with the external Infosimples API.
+Following a major refactoring, the application now uses a unified and normalized architecture for handling fiscal documents. The previous architectural dichotomy has been resolved.
+
+### 2.1. Unified Ingestion Architecture
+
+This is the primary architecture for the application. It is designed to handle both NF-e (Modelo 55) and NFC-e (Modelo 65) through a single, robust flow.
+
+-   **Core Modules:** `ingestion`, `fiscal-document`, `supplier`, `infosimples`.
+-   **Data Model:**
+    -   `supplier`: Stores detailed information about the note issuer (the "supplier" or store), including a `2dsphere` geospatial index for location-based queries.
+    -   `fiscal-document`: Contains schemas (`nfe.schema.ts`, `nfce.schema.ts`) that store the entire raw fiscal document, linked to a supplier.
+-   **Data Flow:** The `ingestion.service` receives a fiscal note key, fetches the data from Infosimples, and passes it to the `fiscal-document.service`. This service then performs an "upsert" on the supplier and saves the complete fiscal document to the appropriate collection (`nfes` or `nfces`).
+
+### 2.2. Deprecated (Legacy) Architecture
+
+The old data model is no longer used by the main ingestion flow but remains in the codebase pending removal.
+
+-   **Modules:** `stores`, `products`, `prices`.
+-   **Status:** These modules and their corresponding schemas are now considered obsolete. The new architecture replaces their functionality with a more structured and scalable approach.
 
 ## 3. API Endpoints
 
-The following primary endpoints have been identified from the `README.md`:
+### Ingestion Module (`/api/ingest`)
 
--   `POST /api/ingest/nfce`: Ingests a new fiscal note using its 44-digit key.
--   `GET /api/product/:ean`: Retrieves a product by its EAN.
--   `GET /api/product/search?q=...`: Searches for products by a query string.
--   `GET /api/price/history/:ean`: Retrieves the price history for a product.
--   `GET /api/price/lowest/:ean`: Finds the lowest recorded price for a product.
--   `GET /api/price/nearby?ean=&lat=&lng=&radius=`: Finds prices for a product in a given geographical area.
+All ingestion endpoints now use the new unified `ingestDocument` service, which can process both NF-e and NFC-e.
 
-## 4. Core Workflow: Data Ingestion & Population
+-   `POST /nfce`: **(Active)** Ingests a fiscal note using its 44-digit key. This endpoint is maintained for backward compatibility.
+-   `POST /auto`: **(Active)** Ingests a fiscal note from a full QR code URL.
+-   `GET /health`: **(Active)** A health check endpoint for monitoring service status.
+-   `GET /debug-raw/:chave`: **(Active)** A debugging endpoint to fetch the raw JSON response from the Infosimples API for a given key.
 
-We have confirmed that the database does **not** need to be pre-populated. The `ingestion.service` implements an **"upsert"** logic:
+### Other Modules
 
--   When an NFC-e is processed via `POST /api/ingest/nfce`:
-    -   The associated store is created if it doesn't exist (based on CNPJ) or updated if it does.
-    -   For each item in the note, the corresponding product is created if it doesn't exist (based on EAN) or left untouched if it does. This uses `$setOnInsert` to avoid overwriting existing product data.
-    -   A new `price` document is always created to record the specific purchase price, date, and location.
+Endpoints for `danfe`, `product`, and `price` modules remain, but `product` and `price` endpoints will need to be refactored to use the new data sources (`fiscal-document` collection).
 
-This allows the database to be built organically from the ingested fiscal notes.
+-   `POST /api/v1/danfe/nfce/html/:chave`: **(Stub)**
+-   `GET /api/product/:ean`: **(Legacy Data)**
+-   `GET /api/price/history/:ean`: **(Legacy Data)**
+
+## 4. Core Workflow: Unified Data Ingestion
+
+The data ingestion workflow is now centralized in the `ingestion` and `fiscal-document` modules.
+
+1.  A request is made to an ingestion endpoint (e.g., `POST /api/ingest/nfce`) with a 44-digit key.
+2.  `IngestionController` calls `IngestionService.ingestDocument()`.
+3.  `IngestionService` fetches the complete data from the `InfosimplesService`.
+4.  The raw data is passed to `FiscalDocumentService.processAndSave()`.
+5.  `FiscalDocumentService` performs two main actions:
+    -   It **upserts** the supplier's data into the `suppliers` collection, creating or updating the record based on the CNPJ. This includes updating the geospatial `location` field.
+    -   It saves the entire fiscal note into the corresponding collection (`nfes` or `nfces`), linking it to the supplier document.
 
 ## 5. Development Log & Current Status
 
--   **Setup:** Project dependencies were installed using `yarn`.
--   **Fixes Implemented:**
-    1.  **Missing Dependencies:** Added `reflect-metadata` and `rxjs` to `package.json` as they were required peer dependencies.
-    2.  **`main.ts` Fix:** Added `import 'reflect-metadata';` to the first line of `src/main.ts` to resolve a startup error.
-    3.  **Schema Errors:** Fixed `Cannot determine a type` errors in `product.schema.ts` and `price.schema.ts` by explicitly defining the type for fields using `Record<string, any>`. The fix was to change `@Prop()` to `@Prop({ type: Object })`.
-    4.  **Dependency Injection:** Resolved a `Nest can't resolve dependencies` error in `ProductsService`. The `PriceModel` was made available to `ProductsModule` by importing it via `MongooseModule.forFeature()`.
-    5.  **Logging:** Added connection logging for MongoDB in `app.module.ts` to provide feedback on the database connection status.
--   **Recent Actions & Discussions:**
-    -   **`.gitignore` Creation:** Created a `.gitignore` file with standard entries for Node.js/NestJS projects.
-    -   **`README.md` Improvement:** Improved and translated the `README.md` to Portuguese, providing a more comprehensive project overview and setup instructions.
-    -   **Authentication Status:** Confirmed that no authentication mechanism is currently implemented.
-    -   **Git Status:** The user has performed a `git push`.
--   **Current Status:** The application is successfully running in development mode (`yarn start:dev`). The user is proceeding to test the `POST /api/ingest/nfce` endpoint using an API client (Insomnia) and a real NFC-e key.
--   **Dependency Update:** Updated all dependencies to their latest versions.
+-   **Architectural Refactoring:** The primary achievement has been the successful integration of the new architecture. The `ingestion` flow was refactored to use a new `FiscalDocumentService`, unifying the processing of NFe and NFCe and saving them to a normalized data model (`Supplier`, `NFe`, `NFCe`).
+-   **Geospatial Feature Parity:** The `supplier.schema.ts` was updated with a `location` field and a `2dsphere` index, ensuring that the new architecture supports the critical geospatial query functionality of the legacy system.
+-   **Current Status:** The application is running in development mode (`yarn start:dev`) with the new unified ingestion architecture in place. The system is ready for testing with both NFe and NFCe keys.
 
 ## 6. Next Steps
 
--   **Aguardando Dados para Teste de Ingestão:** Estamos aguardando os dados de uma nota fiscal (chave NFC-e) do usuário para testar o endpoint de ingestão (`POST /api/ingest/nfce`) e o cadastro de produtos. O trabalho está pausado neste ponto, aguardando essa entrada.
--   **Develop Price Suggestion Feature:** The next major feature to implement is the logic for suggesting a selling price. This will likely involve creating a new endpoint or enhancing an existing one (`/api/price/nearby`) to:
-    1.  Query the database for purchase prices of a given EAN.
-    2.  Apply a business rule (e.g., add a markup percentage) to calculate a suggested selling price.
-    3.  Return this suggestion to the client.
+-   **Test Unified Ingestion:** Thoroughly test the `POST /api/ingest/nfce` and `POST /api/ingest/auto` endpoints with a variety of real NFe and NFCe keys to validate the new, unified workflow.
+-   **Implement DANFE Service:** Complete the implementation of the `danfe.service.ts` stub. It should now read the data from the `nfes` and `nfces` collections to generate HTML/PDF documents.
+-   **Refactor Data-Consuming Endpoints:** Update the services behind the `product` and `price` API endpoints to query the new `fiscal-document` collections instead of the deprecated `products` and `prices` collections. This will likely require creating new services to extract and aggregate product/price data from the stored fiscal documents.
+-   **Plan Deprecation:** Once the new architecture is fully tested and all dependent services are updated, create a plan to safely remove the obsolete `stores`, `products`, and `prices` modules from the codebase.

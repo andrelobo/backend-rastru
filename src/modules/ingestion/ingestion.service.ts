@@ -1,3 +1,4 @@
+// src/modules/ingestion/ingestion.service.ts
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { InfosimplesService } from '../infosimples/infosimples.service';
 import { Model } from 'mongoose';
@@ -27,7 +28,7 @@ export class IngestionService {
     this.logger.log(`🔧 === CONFIGURAÇÃO INFOSIMPLES ===`);
     this.logger.log(`🔧 Token: ${token ? 'PRESENTE' : 'AUSENTE'}`);
     this.logger.log(`🔧 Comprimento: ${token.length} chars`);
-    this.logger.log(`🔧 Modo: ${this.useRealService ? 'REAL (NFE Unificada)' : 'MOCK'}`);
+    this.logger.log(`🔧 Modo: ${this.useRealService ? 'REAL' : 'MOCK'}`);
     this.logger.log(`🔧 ===============================`);
   }
 
@@ -50,7 +51,7 @@ export class IngestionService {
       throw new BadRequestException('Chave deve conter apenas números');
     }
 
-    this.logger.log(`🔧 Usando modo: ${this.useRealService ? 'REAL (NFE Unificada)' : 'MOCK'}`);
+    this.logger.log(`🔧 Usando modo: ${this.useRealService ? 'REAL' : 'MOCK'}`);
     this.logger.log(`🔧 Modelo detectado: ${this.detectarModelo(chaveAcesso)}`);
     
     if (this.useRealService) {
@@ -62,10 +63,9 @@ export class IngestionService {
         return result;
       } catch (error: any) {
         this.logger.error(`❌ Erro NFE Unificada: ${error.message}`);
-        this.logger.warn('🔄 Fazendo fallback para mock...');
-        const mockResult = this.processarComoMock(chaveAcesso);
-        await this.salvarNoBanco(chaveAcesso, mockResult);
-        return mockResult;
+        // REMOVIDO: fallback para mock
+        this.logger.error(`🔄 NÃO HAVERÁ FALLBACK PARA MOCK. Erro persistente na API.`);
+        throw new BadRequestException(`Falha na consulta à API Infosimples: ${error.message}`);
       }
     } else {
       this.logger.warn('⚠️ Usando MOCK - Configure token Infosimples válido para serviço real');
@@ -76,79 +76,139 @@ export class IngestionService {
   }
 
   /**
+   * Método unificado para ingestão (chamado pelo controller)
+   */
+  async ingestDocument(chaveAcesso: string, timeout?: number) {
+    return this.processarNFCe(chaveAcesso, timeout);
+  }
+
+  /**
+   * Processa QR Code automaticamente
+   */
+  async processarAutomaticamente(qrCode: string, timeout?: number) {
+    this.logger.log(`🔍 Processando QR Code automaticamente...`);
+    
+    // Extrair chave do QR Code
+    const chaveAcesso = this.extrairChaveDoQRCode(qrCode);
+    
+    if (!chaveAcesso) {
+      throw new BadRequestException('Não foi possível extrair chave de acesso do QR Code');
+    }
+    
+    return this.processarNFCe(chaveAcesso, timeout);
+  }
+
+  private extrairChaveDoQRCode(qrCode: string): string | null {
+    try {
+      // Extrai chave de URL como: https://...?p=CHAVE_44_DIGITOS...
+      const url = new URL(qrCode);
+      const params = new URLSearchParams(url.search);
+      const pParam = params.get('p');
+      
+      if (pParam && pParam.length >= 44) {
+        // Pode ter outros parâmetros após a chave separados por |
+        const chave = pParam.split('|')[0];
+        if (chave.length === 44 && /^\d+$/.test(chave)) {
+          return chave;
+        }
+      }
+      
+      // Se não encontrou na URL, tenta extrair diretamente
+      const match = qrCode.match(/(\d{44})/);
+      return match ? match[1] : null;
+    } catch {
+      // Se não for URL válida, tenta extrair 44 dígitos
+      const match = qrCode.match(/(\d{44})/);
+      return match ? match[1] : null;
+    }
+  }
+
+  /**
    * Processa com API NFE Unificada REAL
    */
- 
-private async processarComInfosimplesReal(chaveAcesso: string, timeout?: number) {
-  this.logger.log('🔍 Consultando API NFE Unificada...');
-  
-  const dados = await this.infosimplesService.consultNfe(chaveAcesso, timeout);
-  
-  if (!dados.data || dados.data.length === 0) {
-    throw new Error('API não retornou dados da NF-e');
-  }
-  
-  const nota = dados.data[0];
-  
-  // ⚠️ IMPORTANTE: Produtos estão em resumida.produtos, não produtos
-  const produtosRaw = nota.resumida?.produtos || [];
-  
-  // Processar produtos
-  const produtos = produtosRaw.map((prod: any, index: number) => {
-    // Converter valores brasileiros (1.234,56) para float
-    const quantidade = parseFloat(prod.quantidade?.replace('.', '').replace(',', '.') || '1');
-    const valorUnitario = parseFloat(prod.valor_unidade?.replace('.', '').replace(',', '.') || '0');
-    const valorTotal = parseFloat(prod.valor_produto?.replace('.', '').replace(',', '.') || '0');
+  private async processarComInfosimplesReal(chaveAcesso: string, timeout?: number) {
+    this.logger.log('🔍 Consultando API NFE Unificada...');
+    
+    const dados = await this.infosimplesService.consultNfe(chaveAcesso, timeout);
+    
+    // LOG CRÍTICO: Mostra a estrutura COMPLETA da resposta
+    this.logger.debug(`✅ Resposta completa da API: ${JSON.stringify(dados, null, 2)}`);
+    
+    if (!dados) {
+      this.logger.error(`❌ API retornou resposta NULL ou undefined`);
+      throw new Error('API não retornou nenhuma resposta');
+    }
+    
+    // Log detalhado da estrutura, mesmo se vier vazia
+    this.logger.log(`📊 Código da resposta: ${dados.code || 'N/A'}`);
+    this.logger.log(`📊 Mensagem: ${dados.code_message || 'N/A'}`);
+    this.logger.log(`📊 Quantidade de itens (data_count): ${dados.data_count || 0}`);
+    this.logger.log(`📊 Tem erros? ${dados.errors ? JSON.stringify(dados.errors) : 'Não'}`);
+    
+    if (!dados.data || dados.data.length === 0) {
+      this.logger.error(`⚠️ Estrutura da resposta vazia ou sem 'data':`, dados);
+      throw new Error(`API respondeu sem dados da NF-e. Estrutura recebida: ${JSON.stringify(dados)}`);
+    }
+    
+    const nota = dados.data[0];
+    
+    // ⚠️ IMPORTANTE: Produtos estão em resumida.produtos, não produtos
+    const produtosRaw = nota.resumida?.produtos || [];
+    
+    // Processar produtos
+    const produtos = produtosRaw.map((prod: any, index: number) => {
+      // Converter valores brasileiros (1.234,56) para float
+      const quantidade = parseFloat(prod.quantidade?.replace('.', '').replace(',', '.') || '1');
+      const valorUnitario = parseFloat(prod.valor_unidade?.replace('.', '').replace(',', '.') || '0');
+      const valorTotal = parseFloat(prod.valor_produto?.replace('.', '').replace(',', '.') || '0');
+      
+      return {
+        nome: prod.descricao || `Produto ${index + 1}`,
+        ean: prod.ean_comercial || prod.codigo_barras || prod.gtin || null,
+        quantidade: quantidade,
+        valor: valorUnitario,
+        valor_total: valorTotal,
+        unidade: prod.unidade_comercial || 'UN',
+        marca: prod.marca || 'Desconhecida',
+        categoria: prod.categoria || 'Desconhecida',
+        numero_item: prod.num || index + 1,
+        
+        // Campos para rastreamento
+        produto_id: `nf_${chaveAcesso.substring(0, 12)}_${prod.num || index + 1}`,
+        descricao_completa: prod.descricao || '',
+      };
+    });
     
     return {
-      nome: prod.descricao || `Produto ${index + 1}`,
-      ean: null, // NF-e não tem EAN
-      quantidade: quantidade,
-      valor: valorUnitario,
-      valor_total: valorTotal,
-      unidade: prod.unidade_comercial || 'UN',
-      marca: 'Desconhecida',
-      categoria: 'Desconhecida',
-      numero_item: prod.num || index + 1,
-      
-      // Campos para rastreamento
-      produto_id: `nf_${chaveAcesso.substring(0, 12)}_${prod.num || index + 1}`,
-      descricao_completa: prod.descricao || '',
+      message: 'NF-e processada com SUCESSO via NFE Unificada',
+      status: 'sucesso_real',
+      chaveAcesso,
+      dados: {
+        numero: nota.numero || 'N/A',
+        serie: nota.serie || 'N/A',
+        dataEmissao: nota.data_emissao || new Date().toISOString(),
+        valorTotal: parseFloat(nota.resumida?.valor_total?.replace('.', '').replace(',', '.') || '0'),
+        modelo: this.detectarModelo(chaveAcesso),
+        
+        // Emitente
+        emitente: nota.emitente?.nome || 'N/A',
+        cnpjEmitente: nota.emitente?.cnpj || this.extrairCNPJ(chaveAcesso),
+        cidade: nota.emitente?.municipio || 'Desconhecida',
+        uf: nota.emitente?.uf || this.extrairEstado(chaveAcesso.substring(0, 2)),
+        
+        // Produtos
+        produtos,
+        produtosCount: produtos.length,
+        
+        // Informações adicionais
+        ambiente: nota.nfe?.situacao_ambiente || 'Produção',
+        protocolo: nota.nfe?.eventos?.[0]?.protocolo || 'N/A',
+        chave: nota.chave_acesso || chaveAcesso,
+      },
+      timestamp: new Date().toISOString(),
+      api: 'nf-e-unificada',
     };
-  });
-  
-  return {
-    message: 'NF-e processada com SUCESSO via NFE Unificada',
-    status: 'sucesso_real',
-    chaveAcesso,
-    dados: {
-      numero: nota.numero || 'N/A',
-      serie: nota.serie || 'N/A',
-      dataEmissao: nota.data_emissao || new Date().toISOString(),
-      valorTotal: parseFloat(nota.resumida?.valor_total?.replace('.', '').replace(',', '.') || '0'),
-      modelo: 'NF-e',
-      
-      // Emitente
-      emitente: nota.emitente?.nome || 'N/A',
-      cnpjEmitente: nota.emitente?.cnpj || this.extrairCNPJ(chaveAcesso),
-      cidade: nota.emitente?.municipio || 'Desconhecida',
-      uf: nota.emitente?.uf || this.extrairEstado(chaveAcesso.substring(0, 2)),
-      
-      // Produtos
-      produtos,
-      produtosCount: produtos.length,
-      
-      // Informações adicionais
-      ambiente: nota.nfe?.situacao_ambiente || 'Produção',
-      protocolo: nota.nfe?.eventos?.[0]?.protocolo || 'N/A',
-      chave: nota.chave_acesso || chaveAcesso,
-    },
-    timestamp: new Date().toISOString(),
-    api: 'nf-e-unificada',
-    observacao: 'NF-e (Modelo 55) tem dados limitados. Para EAN completo, use NFC-e (Modelo 65).',
-  };
-}
-
+  }
 
   /**
    * Salva dados no banco (atualizado para estrutura NFE)
@@ -380,100 +440,63 @@ private async processarComInfosimplesReal(chaveAcesso: string, timeout?: number)
     };
   }
 
-  async processarAutomaticamente(qrCode: string, timeout?: number) {
-    this.logger.log(`📷 Processando QR Code automaticamente...`);
-    
-    // Extrair chave do QR Code
-    const chaveMatch = qrCode.match(/([0-9]{44})/);
-    if (!chaveMatch) {
-      throw new BadRequestException('QR Code inválido. Não contém chave de 44 dígitos.');
-    }
-    
-    this.logger.log(`🔑 Chave extraída do QR Code: ${chaveMatch[1].substring(0, 8)}...`);
-    
-    return this.processarNFCe(chaveMatch[1], timeout);
-  }
-
-  async verificarConexaoMongoDB(): Promise<boolean> {
-    try {
-      await this.storeModel.db.db.command({ ping: 1 });
-      this.logger.log('✅ MongoDB conectado');
-      return true;
-    } catch (error: any) {
-      this.logger.error(`❌ MongoDB não conectado: ${error.message}`);
-      return false;
-    }
-  }
-
-  async verificarConexaoInfosimples(): Promise<boolean> {
-    if (!this.useRealService) {
-      this.logger.log('ℹ️  Infosimples: Modo MOCK (sem token válido configurado)');
-      return false;
-    }
-    
-    try {
-      this.logger.log('🔍 Testando conexão com NFE Unificada...');
-      const testResult = await this.infosimplesService.testConnection();
-      
-      if (testResult.connected) {
-        this.logger.log('✅ NFE Unificada API respondendo');
-        return true;
-      } else {
-        this.logger.warn(`⚠️  NFE Unificada API: ${testResult.message}`);
-        return false;
-      }
-      
-    } catch (error: any) {
-      this.logger.error(`❌ Erro teste NFE Unificada: ${error.message}`);
-      return false;
-    }
-  }
-
-  async verificarStorage(): Promise<boolean> {
-    try {
-      await this.storeModel.findOne().limit(1);
-      this.logger.log('✅ Storage funcionando');
-      return true;
-    } catch (error: any) {
-      this.logger.error(`❌ Storage error: ${error.message}`);
-      return false;
-    }
-  }
+  // ============ MÉTODOS PARA HEALTH CHECK ============
 
   async testarBanco() {
     try {
-      const stores = await this.storeModel.countDocuments();
-      const products = await this.productModel.countDocuments();
-      const prices = await this.priceModel.countDocuments();
-      
+      const count = await this.storeModel.countDocuments();
       return {
-        connected: true,
-        counts: {
-          stores,
-          products,
-          prices,
-        },
-        timestamp: new Date().toISOString(),
+        success: true,
+        message: `Conexão com MongoDB OK. Lojas no banco: ${count}`,
+        storeCount: count,
+        productCount: await this.productModel.countDocuments(),
+        priceCount: await this.priceModel.countDocuments(),
       };
     } catch (error: any) {
       return {
-        connected: false,
+        success: false,
         error: error.message,
-        timestamp: new Date().toISOString(),
       };
     }
   }
 
-  async testarTokenInfosimples() {
-    const token = process.env.INFOSIMPLES_API_TOKEN || '';
-    
-    return {
-      tokenPresente: !!token,
-      tokenLength: token.length,
-      tokenValido: this.useRealService,
-      tokenPreview: token ? `${token.substring(0, 10)}...` : 'N/A',
-      modoAtual: this.useRealService ? 'REAL (NFE Unificada)' : 'MOCK',
-      timestamp: new Date().toISOString(),
-    };
+  async verificarConexaoMongoDB() {
+    try {
+      await this.storeModel.findOne();
+      return { status: 'connected', timestamp: new Date().toISOString() };
+    } catch (error: any) {
+      return { status: 'disconnected', error: error.message };
+    }
+  }
+
+  async verificarConexaoInfosimples() {
+    try {
+      // Testa com uma chave curta
+      await this.infosimplesService.testConnection();
+      return { status: 'connected', timestamp: new Date().toISOString() };
+    } catch (error: any) {
+      return { status: 'disconnected', error: error.message };
+    }
+  }
+
+  async verificarStorage() {
+    try {
+      const storeCount = await this.storeModel.countDocuments();
+      const productCount = await this.productModel.countDocuments();
+      const priceCount = await this.priceModel.countDocuments();
+      
+      return {
+        status: 'ok',
+        storeCount,
+        productCount,
+        priceCount,
+        storageDate: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        error: error.message,
+      };
+    }
   }
 }

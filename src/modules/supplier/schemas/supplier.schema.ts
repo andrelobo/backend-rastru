@@ -35,9 +35,16 @@ export class Supplier extends Document {
 
   @Prop({ type: Object })
   metadata: Record<string, any>;
+
+  @Prop({
+    type: { type: String, enum: ['Point'], default: 'Point' },
+    coordinates: { type: [Number], default: [0, 0] },
+  })
+  location?: any;
 }
 
 export const SupplierSchema = SchemaFactory.createForClass(Supplier);
 
 SupplierSchema.index({ cnpj: 1 });
 SupplierSchema.index({ nome: 'text', nomeFantasia: 'text' });
+SupplierSchema.index({ location: '2dsphere' });

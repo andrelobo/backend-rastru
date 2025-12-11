@@ -7,11 +7,10 @@ import {
   HttpException,
   BadRequestException,
   Inject,
-  Param  // ← IMPORTANTE!
+  Param
 } from '@nestjs/common';
 import { IngestionService } from './ingestion.service';
 import { InfosimplesService } from '../infosimples/infosimples.service';
-import { IngestNfceDto, IngestAutoDto } from './dto/ingest.dto';
 
 @Controller('ingest')
 export class IngestionController {
@@ -22,17 +21,18 @@ export class IngestionController {
   ) {}
 
   @Post('nfce')
-  async ingestNfce(@Body() body: IngestNfceDto) {
+  async ingestNfce(@Body() body: any) {  // Mudado de IngestNfceDto para any
     try {
       if (!body || !body.chaveAcesso) {
         throw new BadRequestException('Chave de acesso é obrigatória');
       }
       
-      return await this.ingestionService.processarNFCe(body.chaveAcesso, body.timeout);
+      // Usa o novo método unificado
+      return await this.ingestionService.ingestDocument(body.chaveAcesso, body.timeout);
     } catch (error: any) {
       throw new HttpException(
         {
-          message: error.message || 'Erro ao processar NFC-e',
+          message: error.message || 'Erro ao processar documento fiscal',
           error: error.response?.error || 'Internal Server Error',
           statusCode: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
         },
@@ -42,17 +42,18 @@ export class IngestionController {
   }
 
   @Post('auto')
-  async ingestAuto(@Body() body: IngestAutoDto) {
+  async ingestAuto(@Body() body: any) {  // Mudado de IngestAutoDto para any
     try {
       if (!body || !body.qrCode) {
         throw new BadRequestException('QR Code é obrigatório');
       }
       
+      // A lógica de extração da chave fica no serviço
       return await this.ingestionService.processarAutomaticamente(body.qrCode, body.timeout);
     } catch (error: any) {
       throw new HttpException(
         {
-          message: error.message || 'Erro ao processar documento',
+          message: error.message || 'Erro ao processar documento via QR Code',
           error: error.response?.error || 'Internal Server Error',
           statusCode: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
         },

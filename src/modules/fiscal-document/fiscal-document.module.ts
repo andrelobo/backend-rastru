@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { NFCe, NFCeSchema } from './schemas/nfce.schema';
 import { NFe, NFeSchema } from './schemas/nfe.schema';
+import { FiscalDocumentService } from './fiscal-document.service';
+import { SupplierModule } from '../supplier/supplier.module';
 
 @Module({
   imports: [
@@ -9,7 +11,9 @@ import { NFe, NFeSchema } from './schemas/nfe.schema';
       { name: NFCe.name, schema: NFCeSchema },
       { name: NFe.name, schema: NFeSchema },
     ]),
+    SupplierModule,
   ],
-  exports: [MongooseModule], // ← ESSENCIAL!
+  providers: [FiscalDocumentService],
+  exports: [FiscalDocumentService, MongooseModule],
 })
 export class FiscalDocumentModule {}
